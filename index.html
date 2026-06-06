@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2-DOF Ankle Mechanism Analyzer — 2-RSS Parallel Linkage</title>
+<meta name="description" content="Interactive IK/FK solver, singularity heatmap, and 3D visualization for a 2-RSS parallel ankle mechanism with universal joint">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#080b14;--panel:rgba(12,16,30,0.92);--panel-border:rgba(80,110,180,0.18);
+  --accent:#00d4ff;--accent2:#ff6b35;--danger:#ff3366;--safe:#00e87b;--warn:#ffb830;
+  --text:#c8d0e0;--text-dim:#4a5a78;--text-bright:#eef2fa;
+  --mono:'JetBrains Mono',monospace;--sans:'Inter',system-ui,sans-serif;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--sans)}
+body{display:flex;flex-direction:column}
+
+header{padding:10px 20px;display:flex;align-items:center;gap:16px;
+  background:rgba(10,14,26,0.95);border-bottom:1px solid var(--panel-border);flex-shrink:0}
+header h1{font-size:14px;font-weight:600;color:var(--text-bright);white-space:nowrap}
+header .sub{font-size:10px;color:var(--text-dim);letter-spacing:.5px}
+.mode-btns{margin-left:auto;display:flex;gap:2px;background:rgba(255,255,255,.04);border-radius:6px;padding:2px}
+.mode-btns button{padding:5px 14px;border:none;background:none;color:var(--text-dim);font:500 11px var(--sans);
+  cursor:pointer;border-radius:4px;transition:.2s}
+.mode-btns button.active{background:var(--accent);color:#000;font-weight:600}
+.mode-btns button:hover:not(.active){color:var(--text)}
+
+main{flex:1;display:grid;grid-template-columns:1fr 330px;grid-template-rows:1fr;gap:0;overflow:hidden;min-height:0}
+
+/* LEFT: 3D + MAP stacked */
+.left-col{display:flex;flex-direction:column;border-right:1px solid var(--panel-border);overflow:hidden}
+#view-panel{flex:1;position:relative;min-height:0}
+#view-panel canvas{width:100%;height:100%;cursor:grab;display:block}
+#view-panel canvas:active{cursor:grabbing}
+.view-btns{position:absolute;bottom:8px;left:8px;display:flex;gap:3px}
+.view-btns button{padding:3px 8px;border:1px solid var(--panel-border);background:rgba(0,0,0,.6);
+  color:var(--text-dim);font:500 9px var(--sans);border-radius:4px;cursor:pointer;backdrop-filter:blur(6px)}
+.view-btns button:hover{color:var(--accent);border-color:var(--accent)}
+
+#map-panel{height:220px;flex-shrink:0;border-top:1px solid var(--panel-border);position:relative}
+#map-panel .hdr{padding:5px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--panel-border)}
+#map-panel .hdr h2{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim)}
+#map-panel .hdr .badge{font:500 9px var(--mono);padding:1px 6px;border-radius:3px;background:rgba(0,212,255,.1);color:var(--accent)}
+#map-panel canvas{width:100%;height:calc(100% - 28px);display:block}
+.map-legend{position:absolute;bottom:4px;right:6px;display:flex;align-items:center;gap:3px;
+  background:rgba(0,0,0,.7);padding:2px 6px;border-radius:3px;font:9px var(--sans);color:var(--text-dim)}
+.map-legend .grad{width:50px;height:6px;border-radius:2px;
+  background:linear-gradient(to right,#00e87b,#ffb830,#ff3366,#440011)}
+
+/* RIGHT: Controls */
+.right-col{overflow-y:auto;padding:12px 14px}
+.ctrl-grp{margin-bottom:10px}
+.ctrl-grp label{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-dim);margin-bottom:3px}
+.ctrl-grp label .v{font:500 12px var(--mono);color:var(--accent)}
+.ctrl-grp input[type=range]{-webkit-appearance:none;width:100%;height:5px;border-radius:3px;background:rgba(255,255,255,.06);outline:none}
+.ctrl-grp input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--accent);cursor:pointer;border:2px solid var(--bg);box-shadow:0 0 6px rgba(0,212,255,.4)}
+
+.out-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin:8px 0}
+.out-card{background:rgba(255,255,255,.03);border:1px solid var(--panel-border);border-radius:6px;padding:7px 9px}
+.out-card .lbl{font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-dim);margin-bottom:1px}
+.out-card .val{font:600 15px var(--mono);color:var(--text-bright)}
+.out-card.warn .val{color:var(--warn)}.out-card.danger .val{color:var(--danger)}.out-card.safe .val{color:var(--safe)}
+
+.status{display:flex;align-items:center;gap:5px;padding:5px 9px;border-radius:5px;margin:7px 0;font-size:10px}
+.status.ok{background:rgba(0,232,123,.07);border:1px solid rgba(0,232,123,.2);color:var(--safe)}
+.status.warn{background:rgba(255,184,48,.07);border:1px solid rgba(255,184,48,.2);color:var(--warn)}
+.status.danger{background:rgba(255,51,102,.07);border:1px solid rgba(255,51,102,.2);color:var(--danger)}
+.status .dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
+.status.ok .dot{background:var(--safe)}.status.warn .dot{background:var(--warn)}.status.danger .dot{background:var(--danger)}
+
+.divider{height:1px;background:var(--panel-border);margin:8px 0}
+.info{font-size:10px;color:var(--text-dim);line-height:1.4;margin:4px 0}
+.info strong{color:var(--text)}
+
+.branch-sel{display:flex;gap:3px;margin:5px 0}
+.branch-sel button{flex:1;padding:3px 6px;border:1px solid var(--panel-border);background:rgba(255,255,255,.02);
+  color:var(--text-dim);font:500 10px var(--sans);border-radius:4px;cursor:pointer}
+.branch-sel button.active{border-color:var(--accent);color:var(--accent);background:rgba(0,212,255,.06)}
+
+details{margin:7px 0}
+details summary{font-size:11px;color:var(--text-dim);cursor:pointer;padding:3px 0;user-select:none}
+details summary:hover{color:var(--text)}
+details[open] summary{color:var(--accent);margin-bottom:6px}
+
+.jac-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:5px 0}
+.jac-cell{background:rgba(255,255,255,.02);border:1px solid var(--panel-border);border-radius:4px;padding:3px 5px;font:10px var(--mono);color:var(--text-dim)}
+.jac-cell .jl{font-size:7px;text-transform:uppercase;letter-spacing:.4px;color:var(--text-dim);opacity:.6}
+
+.preset-btns{display:flex;gap:3px;margin:5px 0;flex-wrap:wrap}
+.preset-btns button{padding:3px 9px;border:1px solid var(--panel-border);background:rgba(255,255,255,.02);
+  color:var(--text-dim);font:500 10px var(--sans);border-radius:4px;cursor:pointer}
+.preset-btns button:hover{border-color:var(--accent);color:var(--text)}
+
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:2px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>⚙️ 2-DOF Ankle Mechanism</h1>
+  <span class="sub">2-RSS Parallel Linkage · Universal Joint Ankle</span>
+  <div class="mode-btns">
+    <button id="btn-ik" class="active" onclick="setMode('ik')">Inverse Kin.</button>
+    <button id="btn-fk" onclick="setMode('fk')">Forward Kin.</button>
+  </div>
+</header>
+
+<main>
+  <div class="left-col">
+    <div id="view-panel">
+      <canvas id="c3d"></canvas>
+      <div class="view-btns">
+        <button onclick="setView('front')">Front</button>
+        <button onclick="setView('side')">Side</button>
+        <button onclick="setView('top')">Top</button>
+        <button onclick="setView('iso')">Iso</button>
+      </div>
+    </div>
+    <div id="map-panel">
+      <div class="hdr"><h2>Singularity Map</h2><span class="badge" id="map-badge">κ(Pitch,Roll)</span></div>
+      <canvas id="cmap"></canvas>
+      <div class="map-legend"><span>Good</span><div class="grad"></div><span>Singular</span></div>
+    </div>
+  </div>
+
+  <div class="right-col">
+    <!-- IK Controls -->
+    <div id="ik-ctrls">
+      <div class="ctrl-grp">
+        <label>Ankle Pitch (α) <span class="v" id="pv">0.0°</span></label>
+        <input type="range" id="ps" min="-25" max="25" value="0" step="0.1">
+      </div>
+      <div class="ctrl-grp">
+        <label>Ankle Roll (β) <span class="v" id="rv">0.0°</span></label>
+        <input type="range" id="rs" min="-20" max="20" value="0" step="0.1">
+      </div>
+      <div class="out-grid">
+        <div class="out-card" id="t1c"><div class="lbl">Motor ① θ₁</div><div class="val" id="t1o">—</div></div>
+        <div class="out-card" id="t2c"><div class="lbl">Motor ② θ₂</div><div class="val" id="t2o">—</div></div>
+      </div>
+      <div class="info">IK branch (Motor ①):</div>
+      <div class="branch-sel">
+        <button id="b10" onclick="setBr(0,0)">Branch −</button>
+        <button id="b11" class="active" onclick="setBr(0,1)">Branch +</button>
+      </div>
+      <div class="info">IK branch (Motor ②):</div>
+      <div class="branch-sel">
+        <button id="b20" onclick="setBr(1,0)">Branch −</button>
+        <button id="b21" class="active" onclick="setBr(1,1)">Branch +</button>
+      </div>
+    </div>
+
+    <!-- FK Controls -->
+    <div id="fk-ctrls" style="display:none">
+      <div class="ctrl-grp">
+        <label>Motor ① θ₁ <span class="v" id="ft1v">0.0°</span></label>
+        <input type="range" id="ft1s" min="-180" max="180" value="49" step="0.5">
+      </div>
+      <div class="ctrl-grp">
+        <label>Motor ② θ₂ <span class="v" id="ft2v">0.0°</span></label>
+        <input type="range" id="ft2s" min="-180" max="180" value="49" step="0.5">
+      </div>
+      <div class="out-grid">
+        <div class="out-card"><div class="lbl">Pitch (α)</div><div class="val" id="fpo">—</div></div>
+        <div class="out-card"><div class="lbl">Roll (β)</div><div class="val" id="fro">—</div></div>
+      </div>
+    </div>
+
+    <div class="status ok" id="sbar"><div class="dot"></div><span id="stxt">Ready</span></div>
+    <div class="divider"></div>
+
+    <div class="info"><strong>Jacobian Analysis</strong></div>
+    <div class="jac-grid">
+      <div class="jac-cell"><div class="jl">det(J_x) — Type II</div><span id="jdx">—</span></div>
+      <div class="jac-cell"><div class="jl">det(J_θ) — Type I</div><span id="jdt">—</span></div>
+      <div class="jac-cell"><div class="jl">Condition #</div><span id="jcn">—</span></div>
+      <div class="jac-cell"><div class="jl">det(J_mech)</div><span id="jdm">—</span></div>
+    </div>
+    <div class="divider"></div>
+
+    <details id="gdet">
+      <summary>▸ Geometry Parameters</summary>
+      <div class="preset-btns">
+        <button onclick="loadPreset('default')">Your Robot</button>
+        <button onclick="loadPreset('sym')">Symmetric</button>
+        <button onclick="loadPreset('wide')">Wide Ankle</button>
+      </div>
+      <div class="ctrl-grp"><label>Motor ① Z (cm) <span class="v" id="m1zv">27</span></label>
+        <input type="range" id="m1zs" min="10" max="45" value="27" step="0.5"></div>
+      <div class="ctrl-grp"><label>Motor ② Z (cm) <span class="v" id="m2zv">19</span></label>
+        <input type="range" id="m2zs" min="10" max="45" value="19" step="0.5"></div>
+      <div class="ctrl-grp"><label>Crank ① r₁ (cm) <span class="v" id="r1v">3</span></label>
+        <input type="range" id="r1s" min="0.5" max="8" value="3" step="0.1"></div>
+      <div class="ctrl-grp"><label>Crank ② r₂ (cm) <span class="v" id="r2v">3</span></label>
+        <input type="range" id="r2s" min="0.5" max="8" value="3" step="0.1"></div>
+      <div class="ctrl-grp"><label>Rod ① L₁ (cm) <span class="v" id="L1v">25</span></label>
+        <input type="range" id="L1s" min="5" max="40" value="25" step="0.5"></div>
+      <div class="ctrl-grp"><label>Rod ② L₂ (cm) <span class="v" id="L2v">17</span></label>
+        <input type="range" id="L2s" min="5" max="40" value="17" step="0.5"></div>
+      <div class="ctrl-grp"><label>Ankle Spread E (cm) <span class="v" id="Ev">2</span></label>
+        <input type="range" id="Es" min="0.5" max="10" value="2" step="0.1"></div>
+      <div class="ctrl-grp"><label>U-Joint Height (cm) <span class="v" id="Fv">2</span></label>
+        <input type="range" id="Fs" min="0.5" max="8" value="2" step="0.1"></div>
+      <div class="ctrl-grp"><label>Attach offset h (cm) <span class="v" id="hv">2</span></label>
+        <input type="range" id="hs" min="0" max="6" value="2" step="0.1"></div>
+    </details>
+  </div>
+</main>
+
+<script>
+'use strict';
+const DEG=Math.PI/180, RAD=180/Math.PI;
+const v3=(x,y,z)=>({x,y,z});
+const v3a=(a,b)=>v3(a.x+b.x,a.y+b.y,a.z+b.z);
+const v3s=(a,b)=>v3(a.x-b.x,a.y-b.y,a.z-b.z);
+const v3sc=(v,s)=>v3(v.x*s,v.y*s,v.z*s);
+const v3d=(a,b)=>a.x*b.x+a.y*b.y+a.z*b.z;
+const v3lsq=v=>v3d(v,v);
+const v3l=v=>Math.sqrt(v3lsq(v));
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+
+function Rx(a){const c=Math.cos(a),s=Math.sin(a);return[[1,0,0],[0,c,-s],[0,s,c]];}
+function Ry(a){const c=Math.cos(a),s=Math.sin(a);return[[c,0,s],[0,1,0],[-s,0,c]];}
+function mm(A,B){const R=[[0,0,0],[0,0,0],[0,0,0]];for(let i=0;i<3;i++)for(let j=0;j<3;j++)for(let k=0;k<3;k++)R[i][j]+=A[i][k]*B[k][j];return R;}
+function mv(M,v){return v3(M[0][0]*v.x+M[0][1]*v.y+M[0][2]*v.z,M[1][0]*v.x+M[1][1]*v.y+M[1][2]*v.z,M[2][0]*v.x+M[2][1]*v.y+M[2][2]*v.z);}
+
+// ═══════════════════════════════════════════════════
+// MECHANISM MODEL
+// ═══════════════════════════════════════════════════
+// Topology (from CAD images):
+//   Motor ① (top):  shaft along Y, crank extends RIGHT (+X) → Rod ① → ankle RIGHT ball joint
+//   Motor ② (bottom): shaft along Y, crank extends LEFT (−X) → Rod ② → ankle LEFT ball joint
+//   Ankle: Universal joint providing pitch (about X) and roll (about Y)
+//   θ=0: crank UP (+Z). θ increases CW when viewed from +Y
+//
+// Crank tip positions:
+//   Motor ① tip: ( +r₁·sin(θ₁), 0, z₁ + r₁·cos(θ₁) )
+//   Motor ② tip: ( −r₂·sin(θ₂), 0, z₂ + r₂·cos(θ₂) )
+//
+// Ankle platform (body frame, origin at U-joint center):
+//   Right attachment:  (+E/2, 0, +h)
+//   Left attachment:   (−E/2, 0, +h)
+//
+// Rotation: R(pitch,roll) = Rx(pitch) · Ry(roll)
+//   Pitch about X (lateral) = sagittal tilt
+//   Roll about Y (anterior) = frontal tilt
+
+class Mech {
+  constructor(p){this.set(p);}
+  set(p){
+    this.m1z=p.m1z; this.m2z=p.m2z;
+    this.r1=p.r1; this.r2=p.r2;
+    this.L1=p.L1; this.L2=p.L2;
+    this.E=p.E; this.ujZ=p.ujZ; this.ah=p.ah;
+    // Derived: body frame attachment positions
+    this.a1b=v3(p.E/2, 0, p.ah);   // RIGHT
+    this.a2b=v3(-p.E/2, 0, p.ah);  // LEFT
+    this.ac=v3(0, 0, p.ujZ);       // U-joint center world pos
+    // Motor positions (on centerline x=0, y=0)
+    this.m1=v3(0, 0, p.m1z);
+    this.m2=v3(0, 0, p.m2z);
+  }
+  rot(p,r){return mm(Rx(p),Ry(r));}
+  ankW(bp,p,r){return v3a(mv(this.rot(p,r),bp),this.ac);}
+
+  // Motor ① crank tip: extends RIGHT (+X)
+  ct1(th){return v3(this.r1*Math.sin(th), 0, this.m1z+this.r1*Math.cos(th));}
+  // Motor ② crank tip: extends LEFT (−X)
+  ct2(th){return v3(-this.r2*Math.sin(th), 0, this.m2z+this.r2*Math.cos(th));}
+
+  // Solve one motor: |crankTip - ankleWorld|² = L²
+  // For motor 1 (xDir=+1): tip_x = +r·sinθ
+  // For motor 2 (xDir=−1): tip_x = −r·sinθ
+  _solve(mz, r, L, aw, xDir, branch){
+    // tip = (xDir*r*sinθ, 0, mz+r*cosθ)
+    // diff = tip - aw
+    const dx=-aw.x, dy=-aw.y, dz=mz-aw.z;
+    // |(xDir*r*sinθ + dx)² + dy² + (r*cosθ + dz)²| = L²
+    // r² + dx² + dy² + dz² + 2*xDir*r*dx*sinθ + 2*r*dz*cosθ = L²
+    const a = 2*xDir*r*dx;
+    const b = 2*r*dz;
+    const c = L*L - r*r - dx*dx - dy*dy - dz*dz;
+    const R = Math.sqrt(a*a+b*b);
+    if(R<1e-12) return {th:0,ok:false,ratio:1/0};
+    const ratio=c/R;
+    if(Math.abs(ratio)>1) return {th:0,ok:false,ratio};
+    const psi=Math.atan2(a,b);
+    const delta=Math.acos(clamp(ratio,-1,1));
+    return {th:branch===0?psi-delta:psi+delta, ok:true, ratio, br:[psi-delta,psi+delta]};
+  }
+
+  ik(pitch,roll,b1=0,b2=0){
+    const a1=this.ankW(this.a1b,pitch,roll);
+    const a2=this.ankW(this.a2b,pitch,roll);
+    const s1=this._solve(this.m1z,this.r1,this.L1,a1,+1,b1);
+    const s2=this._solve(this.m2z,this.r2,this.L2,a2,-1,b2);
+    return {t1:s1.th,t2:s2.th,ok:s1.ok&&s2.ok,s1,s2};
+  }
+
+  fk(t1,t2,ip=0,ir=0){
+    let p=ip,r=ir;
+    const tip1=this.ct1(t1), tip2=this.ct2(t2);
+    const h=1e-7;
+    for(let it=0;it<150;it++){
+      const a1=this.ankW(this.a1b,p,r), a2=this.ankW(this.a2b,p,r);
+      const f1=v3lsq(v3s(tip1,a1))-this.L1*this.L1;
+      const f2=v3lsq(v3s(tip2,a2))-this.L2*this.L2;
+      if(Math.abs(f1)<1e-10&&Math.abs(f2)<1e-10) return {pitch:p,roll:r,ok:true};
+      const a1p=this.ankW(this.a1b,p+h,r),a1r=this.ankW(this.a1b,p,r+h);
+      const a2p=this.ankW(this.a2b,p+h,r),a2r=this.ankW(this.a2b,p,r+h);
+      const J11=(v3lsq(v3s(tip1,a1p))-this.L1*this.L1-f1)/h;
+      const J12=(v3lsq(v3s(tip1,a1r))-this.L1*this.L1-f1)/h;
+      const J21=(v3lsq(v3s(tip2,a2p))-this.L2*this.L2-f2)/h;
+      const J22=(v3lsq(v3s(tip2,a2r))-this.L2*this.L2-f2)/h;
+      const det=J11*J22-J12*J21;
+      if(Math.abs(det)<1e-18) break;
+      let dp=(-f1*J22+f2*J12)/det, dr=(-f2*J11+f1*J21)/det;
+      const s=Math.min(1,0.3/Math.max(Math.abs(dp),Math.abs(dr),1e-10));
+      p+=dp*s; r+=dr*s;
+    }
+    return {pitch:p,roll:r,ok:false};
+  }
+
+  jacobian(t1,t2,p,r){
+    const h=1e-7;
+    const tip1=this.ct1(t1),tip2=this.ct2(t2);
+    const a1=this.ankW(this.a1b,p,r),a2=this.ankW(this.a2b,p,r);
+    const f1=v3lsq(v3s(tip1,a1))-this.L1*this.L1;
+    const f2=v3lsq(v3s(tip2,a2))-this.L2*this.L2;
+    // ∂f/∂θ
+    const tip1d=this.ct1(t1+h),tip2d=this.ct2(t2+h);
+    const df1t1=(v3lsq(v3s(tip1d,a1))-this.L1*this.L1-f1)/h;
+    const df2t2=(v3lsq(v3s(tip2d,a2))-this.L2*this.L2-f2)/h;
+    // ∂f/∂(p,r)
+    const a1p=this.ankW(this.a1b,p+h,r),a1r=this.ankW(this.a1b,p,r+h);
+    const a2p=this.ankW(this.a2b,p+h,r),a2r=this.ankW(this.a2b,p,r+h);
+    const df1p=(v3lsq(v3s(tip1,a1p))-this.L1*this.L1-f1)/h;
+    const df1r=(v3lsq(v3s(tip1,a1r))-this.L1*this.L1-f1)/h;
+    const df2p=(v3lsq(v3s(tip2,a2p))-this.L2*this.L2-f2)/h;
+    const df2r=(v3lsq(v3s(tip2,a2r))-this.L2*this.L2-f2)/h;
+    const dJt=df1t1*df2t2, dJx=df1p*df2r-df1r*df2p;
+    const dJ=Math.abs(dJt)>1e-15?-dJx/dJt:1/0;
+    let cn=1/0;
+    if(Math.abs(df1t1)>1e-15&&Math.abs(df2t2)>1e-15){
+      const J=[[-df1p/df1t1,-df1r/df1t1],[-df2p/df2t2,-df2r/df2t2]];
+      const nJ=Math.sqrt(J[0][0]**2+J[0][1]**2+J[1][0]**2+J[1][1]**2);
+      const d2=J[0][0]*J[1][1]-J[0][1]*J[1][0];
+      if(Math.abs(d2)>1e-15){
+        const iJ=[[J[1][1]/d2,-J[0][1]/d2],[-J[1][0]/d2,J[0][0]/d2]];
+        cn=nJ*Math.sqrt(iJ[0][0]**2+iJ[0][1]**2+iJ[1][0]**2+iJ[1][1]**2);
+      }
+    }
+    return {dJt,dJx,dJ,cn};
+  }
+
+  vis(t1,t2,p,r){
+    const R=this.rot(p,r);
+    const a1=this.ankW(this.a1b,p,r), a2=this.ankW(this.a2b,p,r);
+    // Foot corners
+    const fw=4,fl=5,fz=-this.ujZ;
+    const fc=[v3(-fl,-fw,fz),v3(fl,-fw,fz),v3(fl,fw,fz),v3(-fl,fw,fz)].map(c=>v3a(mv(R,c),this.ac));
+    return {ct1:this.ct1(t1),ct2:this.ct2(t2),a1,a2,m1:this.m1,m2:this.m2,ac:this.ac,fc};
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// RENDERER
+// ═══════════════════════════════════════════════════
+class Rdr{
+  constructor(cv){this.cv=cv;this.cx=cv.getContext('2d');
+    this.cam={az:-0.45,el:0.35,sc:10,cx:0,cy:0};this.drag=null;this._mouse();}
+  resize(){const d=devicePixelRatio||1,r=this.cv.getBoundingClientRect();
+    this.cv.width=r.width*d;this.cv.height=r.height*d;this.cx.setTransform(d,0,0,d,0,0);
+    this.cam.cx=r.width/2;this.cam.cy=r.height*.55;this.w=r.width;this.h=r.height;}
+  proj(x,y,z){const pz=z-14;
+    const ca=Math.cos(this.cam.az),sa=Math.sin(this.cam.az),ce=Math.cos(this.cam.el),se=Math.sin(this.cam.el);
+    const x1=x*ca-y*sa,y1=x*sa+y*ca;
+    return{sx:x1*this.cam.sc+this.cam.cx,sy:-(y1*se+pz*ce)*this.cam.sc+this.cam.cy,d:y1*ce-pz*se};}
+  _L(p1,p2,c,w){const a=this.proj(p1.x,p1.y,p1.z),b=this.proj(p2.x,p2.y,p2.z);
+    const x=this.cx;x.strokeStyle=c;x.lineWidth=w;x.lineCap='round';x.beginPath();x.moveTo(a.sx,a.sy);x.lineTo(b.sx,b.sy);x.stroke();}
+  _C(p,r,f,s){const pp=this.proj(p.x,p.y,p.z);const x=this.cx;x.fillStyle=f;x.beginPath();
+    x.arc(pp.sx,pp.sy,r,0,Math.PI*2);x.fill();if(s){x.strokeStyle=s;x.lineWidth=1.5;x.stroke();}}
+  _P(pts,f,s){const pp=pts.map(p=>this.proj(p.x,p.y,p.z));const x=this.cx;x.fillStyle=f;x.strokeStyle=s;x.lineWidth=1.5;
+    x.beginPath();x.moveTo(pp[0].sx,pp[0].sy);for(let i=1;i<pp.length;i++)x.lineTo(pp[i].sx,pp[i].sy);x.closePath();x.fill();x.stroke();}
+  _T(p,t,c,ox=10,oy=-8){const pp=this.proj(p.x,p.y,p.z);this.cx.fillStyle=c||'#6a7a9a';this.cx.font='11px Inter,sans-serif';this.cx.textAlign='left';this.cx.fillText(t,pp.sx+ox,pp.sy+oy);}
+
+  render(mech,st,jac){
+    const c=this.cx;
+    const g=c.createLinearGradient(0,0,0,this.h);g.addColorStop(0,'#0c1020');g.addColorStop(1,'#060810');
+    c.fillStyle=g;c.fillRect(0,0,this.w,this.h);
+    // Grid
+    c.globalAlpha=.1;
+    for(let i=-20;i<=20;i+=2){this._L(v3(i,-20,0),v3(i,20,0),'#4466aa',.5);this._L(v3(-20,i,0),v3(20,i,0),'#4466aa',.5);}
+    c.globalAlpha=.2;this._L(v3(-20,0,0),v3(20,0,0),'#ff4466',.8);this._L(v3(0,-20,0),v3(0,20,0),'#44ff66',.8);
+    c.globalAlpha=1;
+    // Shin plate (between motors)
+    const shinTop=Math.max(st.m1.z,st.m2.z)+4, shinBot=st.ac.z+st.a1.z-st.ac.z+2;
+    this._L(v3(0,0,shinTop),v3(0,0,st.ac.z+3),'rgba(100,110,130,0.3)',6);
+    // Foot
+    if(st.fc.length>=4) this._P(st.fc,'rgba(60,70,90,.35)','#556677');
+    // Ankle platform (between attachments)
+    this._L(st.a1,st.a2,'#4466ff',3);
+    this._L(st.ac,st.a1,'rgba(70,100,255,.4)',1.5);
+    this._L(st.ac,st.a2,'rgba(70,100,255,.4)',1.5);
+    // Pushrods
+    this._L(st.ct1,st.a1,'#9ab0cc',3.5);
+    this._L(st.ct2,st.a2,'#9ab0cc',3.5);
+    // Crank arms
+    this._L(st.m1,st.ct1,'#ffcc00',4);
+    this._L(st.m2,st.ct2,'#ffcc00',4);
+    // Motor housings
+    this._C(st.m1,10,'rgba(255,107,53,.15)','#ff6b35');
+    this._C(st.m2,10,'rgba(255,107,53,.15)','#ff6b35');
+    // Crank circles (ghost)
+    const drawCC=(cp,r,xDir)=>{const N=36;c.strokeStyle='rgba(255,204,0,.1)';c.lineWidth=1;c.setLineDash([3,3]);c.beginPath();
+      for(let i=0;i<=N;i++){const a=i/N*Math.PI*2;const pt=v3a(cp,v3(xDir*r*Math.sin(a),0,r*Math.cos(a)));const pp=this.proj(pt.x,pt.y,pt.z);
+        i===0?c.moveTo(pp.sx,pp.sy):c.lineTo(pp.sx,pp.sy);}c.stroke();c.setLineDash([]);};
+    drawCC(st.m1,mech.r1,+1);drawCC(st.m2,mech.r2,-1);
+    // Ball joints
+    this._C(st.ct1,5,'#00d4ff','#008faa');this._C(st.ct2,5,'#00d4ff','#008faa');
+    this._C(st.a1,4,'#00d4ff','#008faa');this._C(st.a2,4,'#00d4ff','#008faa');
+    // Universal joint
+    this._C(st.ac,7,'rgba(100,130,255,.5)','#4466ff');
+    // U-joint cross lines
+    const R=mech.rot(curPitch,curRoll);
+    const cx1=v3a(mv(R,v3(1.5,0,0)),st.ac),cx2=v3a(mv(R,v3(-1.5,0,0)),st.ac);
+    const cy1=v3a(mv(R,v3(0,1.5,0)),st.ac),cy2=v3a(mv(R,v3(0,-1.5,0)),st.ac);
+    this._L(cx1,cx2,'#8899cc',2);this._L(cy1,cy2,'#8899cc',2);
+    // Labels
+    this._T(st.m1,'Motor ① (R)','#cc8844',14,-4);this._T(st.m2,'Motor ② (L)','#cc8844',14,-4);
+    this._T(st.ac,'U-Joint','#6688cc',10,14);
+    // Rod labels
+    const mid1=v3((st.ct1.x+st.a1.x)/2,(st.ct1.y+st.a1.y)/2,(st.ct1.z+st.a1.z)/2);
+    const mid2=v3((st.ct2.x+st.a2.x)/2,(st.ct2.y+st.a2.y)/2,(st.ct2.z+st.a2.z)/2);
+    this._T(mid1,`L₁=${mech.L1}cm`,'rgba(154,176,204,.5)',8,4);
+    this._T(mid2,`L₂=${mech.L2}cm`,'rgba(154,176,204,.5)',-50,4);
+    // Singularity glow
+    if(jac&&jac.cn>20){c.save();c.globalAlpha=clamp((jac.cn-20)/80,0,.3);c.fillStyle='#ff3366';c.fillRect(0,0,this.w,this.h);c.restore();}
+    // Info
+    c.fillStyle='#3a4a68';c.font='10px Inter,sans-serif';c.textAlign='left';
+    c.fillText('Drag to rotate · Scroll to zoom',8,this.h-8);
+  }
+  _mouse(){const cv=this.cv;
+    cv.addEventListener('mousedown',e=>{this.drag={x:e.clientX,y:e.clientY,az:this.cam.az,el:this.cam.el};});
+    cv.addEventListener('touchstart',e=>{if(e.touches.length===1){const t=e.touches[0];this.drag={x:t.clientX,y:t.clientY,az:this.cam.az,el:this.cam.el};e.preventDefault();}},{passive:false});
+    const onM=e=>{if(!this.drag)return;const cx=e.clientX||(e.touches&&e.touches[0]&&e.touches[0].clientX),cy=e.clientY||(e.touches&&e.touches[0]&&e.touches[0].clientY);
+      if(cx==null)return;this.cam.az=this.drag.az+(cx-this.drag.x)*.008;this.cam.el=clamp(this.drag.el-(cy-this.drag.y)*.008,-1.4,1.4);reqUp();};
+    window.addEventListener('mousemove',onM);window.addEventListener('touchmove',onM,{passive:false});
+    const up=()=>{this.drag=null;};window.addEventListener('mouseup',up);window.addEventListener('touchend',up);
+    cv.addEventListener('wheel',e=>{e.preventDefault();this.cam.sc*=e.deltaY>0?.93:1.07;this.cam.sc=clamp(this.cam.sc,3,35);reqUp();},{passive:false});}
+}
+
+// ═══════════════════════════════════════════════════
+// SINGULARITY MAP
+// ═══════════════════════════════════════════════════
+class SMap{
+  constructor(cv){this.cv=cv;this.cx=cv.getContext('2d');this.img=null;this.pR=[-25,25];this.rR=[-20,20];this.res=100;this.dirty=true;}
+  resize(){const d=devicePixelRatio||1,r=this.cv.getBoundingClientRect();this.cv.width=r.width*d;this.cv.height=r.height*d;
+    this.cx.setTransform(d,0,0,d,0,0);this.w=r.width;this.h=r.height;this.dirty=true;}
+  compute(mech,b1,b2){
+    const W=this.res,H=this.res;this.img=this.cx.createImageData(W,H);
+    const pMn=this.pR[0]*DEG,pMx=this.pR[1]*DEG,rMn=this.rR[0]*DEG,rMx=this.rR[1]*DEG;
+    const d=this.img.data;
+    for(let iy=0;iy<H;iy++){const pi=pMn+(pMx-pMn)*iy/(H-1);
+      for(let ix=0;ix<W;ix++){const ri=rMn+(rMx-rMn)*ix/(W-1);const px=(iy*W+ix)*4;
+        const ik=mech.ik(pi,ri,b1,b2);
+        if(!ik.ok){d[px]=25;d[px+1]=25;d[px+2]=35;d[px+3]=255;continue;}
+        const j=mech.jacobian(ik.t1,ik.t2,pi,ri);
+        let val=Math.log10(Math.max(1,Math.min(1e6,j.cn)));
+        let t=clamp(val/3.5,0,1);let r2,g,b;
+        if(t<.33){const s=t/.33;r2=Math.floor(s*200);g=230;b=Math.floor((1-s)*60);}
+        else if(t<.66){const s=(t-.33)/.33;r2=200+Math.floor(s*55);g=Math.floor(230-s*130);b=0;}
+        else{const s=(t-.66)/.34;r2=255-Math.floor(s*180);g=Math.floor(100-s*80);b=Math.floor(s*30);}
+        d[px]=r2;d[px+1]=g;d[px+2]=b;d[px+3]=255;}}
+    this.dirty=false;
+  }
+  render(cP,cR,mxP,mxR){
+    const c=this.cx;c.fillStyle='#080b14';c.fillRect(0,0,this.w,this.h);
+    if(!this.img)return;
+    const m={l:36,r:6,t:4,b:24};const mw=this.w-m.l-m.r,mh=this.h-m.t-m.b;
+    const tmp=document.createElement('canvas');tmp.width=this.res;tmp.height=this.res;
+    tmp.getContext('2d').putImageData(this.img,0,0);c.imageSmoothingEnabled=true;c.drawImage(tmp,m.l,m.t,mw,mh);
+    // Workspace box
+    const rx1=m.l+(-mxR/DEG-this.rR[0])/(this.rR[1]-this.rR[0])*mw,rx2=m.l+(mxR/DEG-this.rR[0])/(this.rR[1]-this.rR[0])*mw;
+    const py1=m.t+(-mxP/DEG-this.pR[0])/(this.pR[1]-this.pR[0])*mh,py2=m.t+(mxP/DEG-this.pR[0])/(this.pR[1]-this.pR[0])*mh;
+    c.strokeStyle='rgba(255,255,255,.5)';c.lineWidth=1.5;c.setLineDash([4,3]);c.strokeRect(rx1,py1,rx2-rx1,py2-py1);c.setLineDash([]);
+    // Axes
+    c.fillStyle='#4a5a78';c.font='8px Inter,sans-serif';c.textAlign='center';
+    for(let r=this.rR[0];r<=this.rR[1];r+=10){const x=m.l+(r-this.rR[0])/(this.rR[1]-this.rR[0])*mw;c.fillText(r+'°',x,this.h-m.b+10);}
+    c.fillText('Roll (β)',m.l+mw/2,this.h-2);
+    c.textAlign='right';
+    for(let p=this.pR[0];p<=this.pR[1];p+=10){const y=m.t+(p-this.pR[0])/(this.pR[1]-this.pR[0])*mh;c.fillText(p+'°',m.l-3,y+3);}
+    c.save();c.translate(6,m.t+mh/2);c.rotate(-Math.PI/2);c.textAlign='center';c.fillText('Pitch (α)',0,0);c.restore();
+    // Current point
+    const cpx=m.l+(cR/DEG-this.rR[0])/(this.rR[1]-this.rR[0])*mw;
+    const cpy=m.t+(cP/DEG-this.pR[0])/(this.pR[1]-this.pR[0])*mh;
+    c.strokeStyle='rgba(255,255,255,.2)';c.lineWidth=.5;c.beginPath();c.moveTo(cpx,m.t);c.lineTo(cpx,m.t+mh);c.moveTo(m.l,cpy);c.lineTo(m.l+mw,cpy);c.stroke();
+    c.fillStyle='#fff';c.strokeStyle='#000';c.lineWidth=2;c.beginPath();c.arc(cpx,cpy,5,0,Math.PI*2);c.fill();c.stroke();
+  }
+}
+
+// ═══════════════════════════════════════════════════
+// APP STATE
+// ═══════════════════════════════════════════════════
+let mode='ik',br1=1,br2=1;
+let curPitch=0,curRoll=0,curT1=0,curT2=0;
+let needMap=true;
+
+const defP=()=>({m1z:27, m2z:19, r1:3, r2:3, L1:25, L2:17, E:2, ujZ:2, ah:2});
+let par=defP();
+let mech=new Mech(par);
+
+const c3d=document.getElementById('c3d'), cmap=document.getElementById('cmap');
+const rdr=new Rdr(c3d), smap=new SMap(cmap);
+
+const $=id=>document.getElementById(id);
+const sv=(id,v)=>{const e=$(id);if(e)e.textContent=v;};
+
+function setMode(m){mode=m;$('btn-ik').classList.toggle('active',m==='ik');$('btn-fk').classList.toggle('active',m==='fk');
+  $('ik-ctrls').style.display=m==='ik'?'':'none';$('fk-ctrls').style.display=m==='fk'?'':'none';
+  if(m==='fk'){$('ft1s').value=curT1*RAD;$('ft2s').value=curT2*RAD;sv('ft1v',(curT1*RAD).toFixed(1)+'°');sv('ft2v',(curT2*RAD).toFixed(1)+'°');}reqUp();}
+
+function setBr(m,b){if(m===0){br1=b;$('b10').classList.toggle('active',b===0);$('b11').classList.toggle('active',b===1);}
+  else{br2=b;$('b20').classList.toggle('active',b===0);$('b21').classList.toggle('active',b===1);}needMap=true;reqUp();}
+
+function setView(n){const v={front:{az:0,el:0},side:{az:-Math.PI/2,el:0},top:{az:0,el:Math.PI/2-.01},iso:{az:-.45,el:.35}};
+  if(v[n]){rdr.cam.az=v[n].az;rdr.cam.el=v[n].el;reqUp();}}
+
+function loadPreset(n){
+  if(n==='default') par=defP();
+  else if(n==='sym') par={m1z:27,m2z:27,r1:3,r2:3,L1:25,L2:25,E:2,ujZ:2,ah:2};
+  else if(n==='wide') par={m1z:27,m2z:19,r1:3,r2:3,L1:25,L2:17,E:6,ujZ:2,ah:2};
+  mech.set(par);syncSliders();needMap=true;reqUp();
+}
+
+function syncSliders(){
+  $('m1zs').value=par.m1z;sv('m1zv',par.m1z);$('m2zs').value=par.m2z;sv('m2zv',par.m2z);
+  $('r1s').value=par.r1;sv('r1v',par.r1);$('r2s').value=par.r2;sv('r2v',par.r2);
+  $('L1s').value=par.L1;sv('L1v',par.L1);$('L2s').value=par.L2;sv('L2v',par.L2);
+  $('Es').value=par.E;sv('Ev',par.E);$('Fs').value=par.ujZ;sv('Fv',par.ujZ);
+  $('hs').value=par.ah;sv('hv',par.ah);
+}
+
+function readSliders(){
+  par={m1z:+$('m1zs').value, m2z:+$('m2zs').value, r1:+$('r1s').value, r2:+$('r2s').value,
+    L1:+$('L1s').value, L2:+$('L2s').value, E:+$('Es').value, ujZ:+$('Fs').value, ah:+$('hs').value};
+  mech.set(par);
+  sv('m1zv',par.m1z);sv('m2zv',par.m2z);sv('r1v',par.r1);sv('r2v',par.r2);
+  sv('L1v',par.L1);sv('L2v',par.L2);sv('Ev',par.E);sv('Fv',par.ujZ);sv('hv',par.ah);
+  needMap=true;
+}
+
+// ═══════════════════════════════════════════════════
+// UPDATE
+// ═══════════════════════════════════════════════════
+let upPend=false;
+function reqUp(){if(!upPend){upPend=true;requestAnimationFrame(doUp);}}
+
+function doUp(){
+  upPend=false;
+  let jac=null;
+  if(mode==='ik'){
+    curPitch=+$('ps').value*DEG;curRoll=+$('rs').value*DEG;
+    sv('pv',$('ps').value+'°');sv('rv',$('rs').value+'°');
+    const ik=mech.ik(curPitch,curRoll,br1,br2);
+    if(ik.ok){
+      curT1=ik.t1;curT2=ik.t2;
+      sv('t1o',(curT1*RAD).toFixed(1)+'°');sv('t2o',(curT2*RAD).toFixed(1)+'°');
+      $('t1c').className='out-card';$('t2c').className='out-card';
+      jac=mech.jacobian(curT1,curT2,curPitch,curRoll);
+    }else{
+      sv('t1o','N/A');sv('t2o','N/A');
+      $('t1c').className='out-card danger';$('t2c').className='out-card danger';
+    }
+  }else{
+    curT1=+$('ft1s').value*DEG;curT2=+$('ft2s').value*DEG;
+    sv('ft1v',$('ft1s').value+'°');sv('ft2v',$('ft2s').value+'°');
+    const fk=mech.fk(curT1,curT2,curPitch,curRoll);
+    if(fk.ok){curPitch=fk.pitch;curRoll=fk.roll;
+      sv('fpo',(curPitch*RAD).toFixed(1)+'°');sv('fro',(curRoll*RAD).toFixed(1)+'°');
+      jac=mech.jacobian(curT1,curT2,curPitch,curRoll);
+    }else{sv('fpo','N/A');sv('fro','N/A');}
+  }
+  // Status
+  if(jac){
+    sv('jdx',jac.dJx.toFixed(2));sv('jdt',jac.dJt.toFixed(2));
+    sv('jcn',jac.cn<1e5?jac.cn.toFixed(1):'∞');sv('jdm',Math.abs(jac.dJ)<1e5?jac.dJ.toFixed(4):'∞');
+    const sb=$('sbar'),st=$('stxt');
+    if(jac.cn<10){sb.className='status ok';st.textContent='Well conditioned — κ='+jac.cn.toFixed(1);}
+    else if(jac.cn<50){sb.className='status warn';st.textContent='Moderate — κ='+jac.cn.toFixed(1);}
+    else{sb.className='status danger';
+      if(Math.abs(jac.dJx)<.1)st.textContent='⚠ TYPE II — ankle loses constraint!';
+      else if(Math.abs(jac.dJt)<.1)st.textContent='⚠ TYPE I — motor loses effect!';
+      else st.textContent='Near singular — κ='+(jac.cn<1e5?jac.cn.toFixed(0):'∞');}
+  }
+  // Render
+  rdr.resize();const st=mech.vis(curT1,curT2,curPitch,curRoll);rdr.render(mech,st,jac);
+  smap.resize();if(needMap){smap.compute(mech,br1,br2);needMap=false;}
+  smap.render(curPitch,curRoll,20*DEG,15*DEG);
+}
+
+// Events
+$('ps').addEventListener('input',reqUp);$('rs').addEventListener('input',reqUp);
+$('ft1s').addEventListener('input',reqUp);$('ft2s').addEventListener('input',reqUp);
+['m1z','m2z','r1','r2','L1','L2','E','F','h'].forEach(id=>
+  $(id+'s').addEventListener('input',()=>{readSliders();reqUp();}));
+window.addEventListener('resize',()=>{needMap=true;reqUp();});
+
+// Init
+syncSliders();
+const initIK=mech.ik(0,0,br1,br2);
+if(initIK.ok){curT1=initIK.t1;curT2=initIK.t2;}
+reqUp();
+console.log('Ankle Mechanism: Motor①(RIGHT,z=27) L₁=25cm, Motor②(LEFT,z=19) L₂=17cm');
+console.log('Neutral angles:',initIK.ok?(curT1*RAD).toFixed(1)+'°, '+(curT2*RAD).toFixed(1)+'°':'NO SOLUTION');
+</script>
+</body>
+</html>
